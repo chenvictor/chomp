@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <climits>
 
 // curses
 #include <ncurses.h>
@@ -16,35 +17,6 @@
 using namespace std::chrono_literals;
 
 const int MAXN = 10;
-
-struct State: public std::vector<int> {
-  using vector::vector;
-  bool is_empty() const {
-    return back() == 0;
-  }
-};
-
-struct Move {
-  int r, c;
-  // number of followers
-  int nx_cnt = 0;
-  // number of winning followers
-  int nx_win = 0;
-  State apply(State from) const {
-    assert(from[r] > c);
-    for (int k = 0; k <= r; ++k) {
-      from[k] = std::min(c, from[k]);
-    }
-    return from;
-  }
-  bool operator==(const Move& b) const {
-    return r==b.r && c==b.c;
-  }
-  bool is_winning() const {
-    return nx_win == 0;
-  }
-};
-const Move LOSING = {-1,-1};
 
 namespace args {
   struct {
@@ -68,8 +40,7 @@ namespace args {
           player[0].set_computer();
           break;
         case '2':
-          fprintf(stderr, "computer 2 is not implemented, skipping -2\n");
-//          player[1].set_computer();
+          player[1].set_computer();
           break;
       }
     }
@@ -86,6 +57,33 @@ namespace args {
   }
 }
 
+struct State: public std::vector<int> {
+  using vector::vector;
+  bool is_empty() const {
+    return back() == 0;
+  }
+};
+
+struct Move {
+  int r = 0, c = 0;
+  // number of followers
+  int nx_cnt = 0;
+  // number of winning followers
+  int nx_win = 0;
+  State apply(State from) const {
+    assert(from[r] > c);
+    for (int k = 0; k <= r; ++k) {
+      from[k] = std::min(c, from[k]);
+    }
+    return from;
+  }
+  bool is_winning() const {
+    // misere play => no moves is win
+    // or has a losing follower
+    return nx_cnt == 0 || nx_win < nx_cnt;
+  }
+};
+
 std::map<State, Move> strategy;
 
 Move dfs(const State& state) {
@@ -94,20 +92,33 @@ Move dfs(const State& state) {
     return it->second;
   }
   if (state.is_empty()) {
-    return strategy[state] = {-1, 0};
+    return strategy[state] = {-1,-1};
   }
-  strategy[state] = LOSING;
-  Move mv;
+  Move mv, best = {args::rows-1,0,0,0};
   for (int i = 0; i < args::rows; ++i) {
     for (int j = 0; j < state[i]; ++j) {
-      mv = {i,j};
-      const auto nx = mv.apply(state);
-      if (dfs(mv.apply(state)) == LOSING) {
-        strategy[state] = mv;
+      mv.nx_cnt++;
+      Move temp = {i,j};
+      Move nx;
+      if ((nx = dfs(temp.apply(state))).is_winning()) {
+        mv.nx_win++;
+        if (nx.nx_cnt > best.nx_cnt) {
+          best.r = i;
+          best.c = j;
+          best.nx_win = nx.nx_win;
+          best.nx_cnt = nx.nx_cnt;
+        }
+      } else {
+        mv.r = i;
+        mv.c = j;
       }
     }
   }
-  return strategy[state];
+  if (!mv.is_winning()) {
+    mv.r = best.r;
+    mv.c = best.c;
+  }
+  return strategy[state] = mv;
 }
 
 void calc() {
@@ -123,6 +134,7 @@ std::pair<int,int> get_click() {
   MEVENT event;
   int ch;
   while(1) {
+    flushinp();
     ch = getch();
     if (ch != KEY_MOUSE) continue;
     if (getmouse(&event) != OK) continue;
@@ -144,8 +156,6 @@ void print_state(const State& s) {
     printw("\n");
   }
 }
-
-bool computer_move[2] = {true, false};
 
 void turn(State& state, int t) {
   print_state(state);
@@ -180,13 +190,18 @@ void game() {
     curs_set(0);
     mousemask(BUTTON1_CLICKED, NULL);
   }
-  State state(args::rows, args::cols);
-  int t = 0;
-  while(!state.is_empty()) {
-    turn(state, t);
-    t++;
+  while(1) {
+    State state(args::rows, args::cols);
+    int t = 0;
+    while(!state.is_empty()) {
+      turn(state, t);
+      t++;
+    }
+    print_state(state);
+    flushinp();
+    mvprintw(args::rows,0,"%s wins! Press any key or click to restart", args::player[t%2].name.c_str());
+    getch();
   }
-  endwin();
 }
 
 int main(int argc, char** argv) {
