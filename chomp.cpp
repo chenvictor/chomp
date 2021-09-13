@@ -1,10 +1,18 @@
+#include <ncurses.h>
+
 #include <cassert>
 #include <iostream>
 #include <vector>
 #include <map>
 
 const int MAXN = 10;
-using State = std::vector<int>;
+
+struct State: public std::vector<int> {
+  using vector::vector;
+  bool is_empty() const {
+    return back() == 0;
+  }
+};
 
 struct Move {
   int r, c;
@@ -23,15 +31,6 @@ struct Move {
 const Move LOSING = {-1,-1};
 
 int r, c;
-void print_state(const State& s) {
-  for(int i = 0; i < r; i++) {
-    for(int j = 0; j < c; j++) {
-      printf("%c", " X"[j < s[i]]);
-    }
-    printf("\n");
-  }
-  fflush(stdout);
-}
 
 std::map<State, Move> vis;
 
@@ -40,7 +39,7 @@ Move dfs(const State& state) {
   if (it != vis.end()) {
     return it->second;
   }
-  if (state.back() == 0) {
+  if (state.is_empty()) {
     return vis[state] = {-1, 0};
   }
   vis[state] = LOSING;
@@ -56,8 +55,67 @@ Move dfs(const State& state) {
   return vis[state];
 }
 
+void calc() {
+  const State initial(r, c);
+  printf("calculating states... ");
+  fflush(stdout);
+  dfs(initial);
+  printf("%lu\nEnter to continue", vis.size());
+  getchar();
+}
+
+std::pair<int,int> get_click() {
+  MEVENT event;
+  int ch;
+  while(1) {
+    ch = getch();
+    if (ch != KEY_MOUSE) continue;
+    if (getmouse(&event) != OK) continue;
+    if (!(event.bstate & BUTTON1_CLICKED)) continue;
+    const int y = event.y;
+    const int x = event.x;
+    if (y >= r) continue;
+    if (x >= c) continue;
+    return {y,x};
+  }
+}
+
+void print_state(const State& s) {
+  move(0,0);
+  for(int i = 0; i < r; i++) {
+    for(int j = 0; j < c; j++) {
+      printw("%c", " X"[j < s[i]]);
+    }
+    printw("\n");
+  }
+}
+
+void game() {
+  {
+    // curses setup
+    initscr();
+    raw();
+    cbreak();
+    noecho();
+    keypad(stdscr, true);
+    curs_set(0);
+    mousemask(BUTTON1_CLICKED, NULL);
+  }
+  State state(r, c);
+  while(!state.is_empty()) {
+    print_state(state);
+    int y,x;
+    do {
+      std::tie(y,x) = get_click();
+    } while(x >= state[y]);
+    Move move = {y,x};
+    state = move.apply(state);
+  }
+  endwin();
+}
+
 int main(int argc, char** argv) {
-  if (argc != 3) {
+  if (argc < 3) {
     fprintf(stderr, "usage: %s r c\n", argv[0]);
     return -1;
   }
@@ -67,14 +125,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "r,c should be in range [1,%d]\n", MAXN);
     return -1;
   }
-  const State initial(r, c);
-  printf("counting states... ");
-  fflush(stdout);
-  dfs(initial);
-  printf("%lu\n", vis.size());
-  auto mv = vis[initial];
-  print_state(initial);
-  printf("winning move %d %d\n", mv.r, mv.c);
-  auto nx = mv.apply(initial);
+  calc();
+  game();
 }
 
